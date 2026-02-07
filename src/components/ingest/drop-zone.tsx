@@ -20,6 +20,15 @@ interface IngestResponse {
   error?: string;
 }
 
+interface ProgressEvent {
+  type: "progress" | "complete" | "error";
+  current?: number;
+  total?: number;
+  message?: string;
+  hexes?: Hex[];
+  error?: string;
+}
+
 export function DropZone() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -28,6 +37,8 @@ export function DropZone() {
   const [status, setStatus] = useState<Status>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [progressMessage, setProgressMessage] = useState("");
+  const [progressPercent, setProgressPercent] = useState(0);
 
   // Text input state
   const [pastedText, setPastedText] = useState("");
@@ -40,20 +51,17 @@ export function DropZone() {
     setStatus("idle");
     setErrorMessage("");
     setSuccessMessage("");
+    setProgressMessage("");
+    setProgressPercent(0);
   }, []);
 
   const handleSuccess = useCallback(
-    (response: IngestResponse) => {
-      if (response.success && response.data) {
-        setStatus("success");
-        setSuccessMessage(
-          `Created ${response.data.hexes.length} hex(es): ${response.data.message}`
-        );
-        // Redirect to viewer after short delay
-        setTimeout(() => {
-          router.push("/viewer");
-        }, 1500);
-      }
+    (hexes: Hex[], message: string) => {
+      setStatus("success");
+      setSuccessMessage(`Created ${hexes.length} hex(es): ${message}`);
+      setTimeout(() => {
+        router.push("/viewer");
+      }, 1500);
     },
     [router]
   );
@@ -62,6 +70,72 @@ export function DropZone() {
     setStatus("error");
     setErrorMessage(message);
   }, []);
+
+  const processFilesWithStreaming = useCallback(
+    async (files: File[]) => {
+      setStatus("processing");
+      setProgressMessage(`Starting batch upload of ${files.length} file(s)...`);
+      setProgressPercent(0);
+
+      const formData = new FormData();
+      files.forEach((file) => formData.append("file", file));
+
+      try {
+        const response = await fetch("/api/ingest/stream", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          handleError(data.error || "Failed to process files");
+          return;
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          handleError("No response stream");
+          return;
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const event: ProgressEvent = JSON.parse(line.slice(6));
+
+                if (event.type === "progress") {
+                  setProgressMessage(event.message || "Processing...");
+                  if (event.current && event.total) {
+                    setProgressPercent(Math.round((event.current / event.total) * 100));
+                  }
+                } else if (event.type === "complete") {
+                  handleSuccess(event.hexes || [], event.message || "Complete");
+                } else if (event.type === "error") {
+                  handleError(event.error || "Unknown error");
+                }
+              } catch {
+                // Ignore parse errors
+              }
+            }
+          }
+        }
+      } catch {
+        handleError("Network error. Please try again.");
+      }
+    },
+    [handleSuccess, handleError]
+  );
 
   const processFile = useCallback(
     async (file: File) => {
@@ -91,8 +165,8 @@ export function DropZone() {
 
         const data: IngestResponse = await response.json();
 
-        if (data.success) {
-          handleSuccess(data);
+        if (data.success && data.data) {
+          handleSuccess(data.data.hexes, data.data.message);
         } else {
           handleError(data.error || "Failed to process file");
         }
@@ -108,12 +182,31 @@ export function DropZone() {
       e.preventDefault();
       resetState();
 
-      const file = e.dataTransfer.files[0];
-      if (file) {
-        processFile(file);
+      const files = Array.from(e.dataTransfer.files);
+
+      if (files.length === 0) return;
+
+      // Validate all files
+      for (const file of files) {
+        if (file.size > 10 * 1024 * 1024) {
+          handleError(`File "${file.name}" exceeds 10MB limit`);
+          return;
+        }
+        const extension = file.name.split(".").pop()?.toLowerCase();
+        if (!["pdf", "txt", "md"].includes(extension || "")) {
+          handleError(`File "${file.name}" has unsupported type. Use PDF, TXT, or MD.`);
+          return;
+        }
+      }
+
+      if (files.length === 1) {
+        processFile(files[0]);
+      } else {
+        // Batch upload with streaming
+        processFilesWithStreaming(files);
       }
     },
-    [processFile, resetState]
+    [processFile, processFilesWithStreaming, resetState, handleError]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -127,13 +220,18 @@ export function DropZone() {
 
   const handleFileSelect = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        resetState();
-        processFile(file);
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+
+      resetState();
+
+      if (files.length === 1) {
+        processFile(files[0]);
+      } else {
+        processFilesWithStreaming(files);
       }
     },
-    [processFile, resetState]
+    [processFile, processFilesWithStreaming, resetState]
   );
 
   const handleTextSubmit = useCallback(async () => {
@@ -156,8 +254,8 @@ export function DropZone() {
 
       const data: IngestResponse = await response.json();
 
-      if (data.success) {
-        handleSuccess(data);
+      if (data.success && data.data) {
+        handleSuccess(data.data.hexes, data.data.message);
       } else {
         handleError(data.error || "Failed to process text");
       }
@@ -188,8 +286,8 @@ export function DropZone() {
 
       const data: IngestResponse = await response.json();
 
-      if (data.success) {
-        handleSuccess(data);
+      if (data.success && data.data) {
+        handleSuccess(data.data.hexes, data.data.message);
       } else {
         handleError(data.error || "Failed to process URL");
       }
@@ -227,7 +325,7 @@ export function DropZone() {
       >
         <TabsList className="w-full mb-4">
           <TabsTrigger value="file" className="flex-1">
-            File
+            Files
           </TabsTrigger>
           <TabsTrigger value="text" className="flex-1">
             Paste Text
@@ -250,13 +348,22 @@ export function DropZone() {
               type="file"
               className="hidden"
               accept=".pdf,.txt,.md"
+              multiple
               onChange={handleFileSelect}
             />
 
             {status === "processing" ? (
               <div className="space-y-3">
                 <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto" />
-                <p className="text-muted-foreground">Processing document...</p>
+                <p className="text-muted-foreground">{progressMessage || "Processing..."}</p>
+                {progressPercent > 0 && (
+                  <div className="w-full max-w-xs mx-auto bg-muted rounded-full h-2">
+                    <div
+                      className="bg-primary h-2 rounded-full transition-all"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                )}
               </div>
             ) : status === "success" ? (
               <div className="space-y-3">
@@ -282,10 +389,13 @@ export function DropZone() {
                 <p className="text-lg font-medium">
                   {status === "dragover"
                     ? "Drop it!"
-                    : "Drop a file or click to upload"}
+                    : "Drop files or click to upload"}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  PDF, TXT, or Markdown (max 10MB)
+                  PDF, TXT, or Markdown (max 10MB each)
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Supports batch upload — drop multiple files
                 </p>
               </div>
             )}

@@ -1,7 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { nanoid } from "nanoid";
-import { CreateHexInput, createHexSchema } from "./schemas";
+import { CreateHexInput, createHexSchema, Hex } from "./schemas";
+import { queryHexes } from "./hive-query";
 
 const anthropic = new Anthropic();
 
@@ -41,12 +42,154 @@ export interface ProcessDocumentInput {
   text: string;
   sourceName: string;
   sourceType: "pdf" | "text" | "url" | "markdown";
+  existingHexes?: Hex[]; // For relationship discovery
 }
 
 export interface ProcessDocumentResult {
   hexes: CreateHexInput[];
   message: string;
 }
+
+export interface DocumentChunk {
+  title: string;
+  content: string;
+  index: number;
+}
+
+// ============================================
+// DOCUMENT CHUNKING
+// ============================================
+
+/**
+ * Split a document into chunks by headings or logical sections
+ */
+export function chunkDocument(text: string, maxChunkSize = 15000): DocumentChunk[] {
+  // Try to split by markdown headings first
+  const headingPattern = /^(#{1,3})\s+(.+)$/gm;
+  const matches = [...text.matchAll(headingPattern)];
+
+  if (matches.length >= 2) {
+    // Document has multiple sections, split by headings
+    const chunks: DocumentChunk[] = [];
+
+    for (let i = 0; i < matches.length; i++) {
+      const match = matches[i];
+      const startIndex = match.index!;
+      const endIndex = i + 1 < matches.length ? matches[i + 1].index! : text.length;
+      const content = text.slice(startIndex, endIndex).trim();
+
+      if (content.length > 100) { // Skip very short sections
+        chunks.push({
+          title: match[2].trim(),
+          content,
+          index: i,
+        });
+      }
+    }
+
+    // If we got reasonable chunks, return them
+    if (chunks.length >= 2) {
+      return chunks;
+    }
+  }
+
+  // Fallback: split by paragraph breaks for very long documents
+  if (text.length > maxChunkSize) {
+    const paragraphs = text.split(/\n\n+/);
+    const chunks: DocumentChunk[] = [];
+    let currentChunk = "";
+    let chunkIndex = 0;
+
+    for (const para of paragraphs) {
+      if (currentChunk.length + para.length > maxChunkSize && currentChunk.length > 0) {
+        chunks.push({
+          title: `Section ${chunkIndex + 1}`,
+          content: currentChunk.trim(),
+          index: chunkIndex,
+        });
+        chunkIndex++;
+        currentChunk = para;
+      } else {
+        currentChunk += (currentChunk ? "\n\n" : "") + para;
+      }
+    }
+
+    if (currentChunk.trim().length > 100) {
+      chunks.push({
+        title: `Section ${chunkIndex + 1}`,
+        content: currentChunk.trim(),
+        index: chunkIndex,
+      });
+    }
+
+    if (chunks.length >= 2) {
+      return chunks;
+    }
+  }
+
+  // Single chunk for short documents
+  return [{
+    title: "Main Content",
+    content: text,
+    index: 0,
+  }];
+}
+
+// ============================================
+// RELATIONSHIP DISCOVERY
+// ============================================
+
+/**
+ * Find related hexes and add edges to new hexes
+ */
+export function discoverRelationships(
+  newHexes: CreateHexInput[],
+  existingHexes: Hex[],
+  minScore = 2
+): CreateHexInput[] {
+  if (!existingHexes.length) return newHexes;
+
+  return newHexes.map((hex) => {
+    // Create a search intent from the hex's name, description, and hints
+    const searchIntent = [
+      hex.name,
+      hex.description || "",
+      ...hex.entryHints.slice(0, 3),
+    ].join(" ");
+
+    // Query existing hexes for related content
+    const related = queryHexes(existingHexes, searchIntent, 3);
+
+    // Filter to good matches and exclude self
+    const validRelated = related.filter(
+      (r) => r.score >= minScore && r.hex.id !== hex.id
+    );
+
+    if (!validRelated.length) return hex;
+
+    // Create edges to related hexes
+    const newEdges = validRelated.map((r, i) => ({
+      id: `related-${r.hex.id}`,
+      to: r.hex.id,
+      when: { intent: `explore ${r.hex.name.toLowerCase()}` },
+      priority: 50 - i * 10,
+      description: `Related: ${r.hex.name}`,
+    }));
+
+    // Merge with existing edges, avoiding duplicates
+    const existingToIds = new Set(hex.edges.map((e) => e.to));
+    const uniqueNewEdges = newEdges.filter((e) => !existingToIds.has(e.to));
+
+    return {
+      ...hex,
+      edges: [...hex.edges, ...uniqueNewEdges],
+    };
+  });
+}
+
+// ============================================
+// ID UTILITIES
+// ============================================
 
 /**
  * Sanitize an ID to match the hex schema requirements:
@@ -62,18 +205,124 @@ function sanitizeId(id: string): string {
 }
 
 /**
+ * Ensure ID uniqueness by appending suffix if needed
+ */
+function ensureUniqueId(id: string, existingIds: Set<string>): string {
+  let uniqueId = id;
+  let suffix = 1;
+  while (existingIds.has(uniqueId)) {
+    uniqueId = `${id}-${suffix}`;
+    suffix++;
+  }
+  existingIds.add(uniqueId);
+  return uniqueId;
+}
+
+// ============================================
+// MAIN PROCESSING
+// ============================================
+
+/**
  * Process a document and generate hex structures using Claude
  */
 export async function processDocument(
   input: ProcessDocumentInput
 ): Promise<ProcessDocumentResult> {
-  const { text, sourceName, sourceType } = input;
+  const { text, sourceName, sourceType, existingHexes = [] } = input;
 
-  // Truncate very long documents (Claude can handle ~100k tokens but we'll be conservative)
+  // Check if document should be chunked
+  const chunks = chunkDocument(text);
+  const isChunked = chunks.length > 1;
+
+  // Track IDs to ensure uniqueness
+  const usedIds = new Set(existingHexes.map((h) => h.id));
+
+  let allHexes: CreateHexInput[] = [];
+  let summaries: string[] = [];
+
+  for (const chunk of chunks) {
+    const chunkName = isChunked ? `${sourceName} - ${chunk.title}` : sourceName;
+    const result = await processChunk(chunk.content, chunkName, sourceType);
+
+    // Ensure unique IDs
+    const hexesWithUniqueIds = result.hexes.map((hex) => ({
+      ...hex,
+      id: ensureUniqueId(hex.id, usedIds),
+    }));
+
+    allHexes.push(...hexesWithUniqueIds);
+    summaries.push(result.message);
+  }
+
+  // Link chunks together if document was split
+  if (isChunked && allHexes.length > 1) {
+    allHexes = linkChunkedHexes(allHexes, sourceName);
+  }
+
+  // Discover relationships with existing hexes
+  if (existingHexes.length > 0) {
+    allHexes = discoverRelationships(allHexes, existingHexes);
+  }
+
+  return {
+    hexes: allHexes,
+    message: isChunked
+      ? `Processed ${chunks.length} sections: ${summaries.join(" | ")}`
+      : summaries[0] || "Document processed",
+  };
+}
+
+/**
+ * Link hexes from chunked documents with next/prev edges
+ */
+function linkChunkedHexes(hexes: CreateHexInput[], sourceName: string): CreateHexInput[] {
+  return hexes.map((hex, i) => {
+    const edges = [...hex.edges];
+
+    if (i > 0) {
+      edges.push({
+        id: `prev-${hexes[i - 1].id}`,
+        to: hexes[i - 1].id,
+        when: { intent: "previous section" },
+        priority: 80,
+        description: `Previous: ${hexes[i - 1].name}`,
+      });
+    }
+
+    if (i < hexes.length - 1) {
+      edges.push({
+        id: `next-${hexes[i + 1].id}`,
+        to: hexes[i + 1].id,
+        when: { intent: "next section" },
+        priority: 80,
+        description: `Next: ${hexes[i + 1].name}`,
+      });
+    }
+
+    // Add source tag for grouping
+    const tags = [...hex.tags];
+    const sourceTag = sanitizeId(sourceName).slice(0, 20);
+    if (!tags.includes(sourceTag)) {
+      tags.push(sourceTag);
+    }
+
+    return { ...hex, edges, tags };
+  });
+}
+
+/**
+ * Process a single chunk of text
+ */
+async function processChunk(
+  text: string,
+  sourceName: string,
+  sourceType: ProcessDocumentInput["sourceType"]
+): Promise<ProcessDocumentResult> {
+  // Truncate if still too long
   const maxChars = 50000;
   const truncatedText =
     text.length > maxChars
-      ? text.slice(0, maxChars) + "\n\n[Document truncated...]"
+      ? text.slice(0, maxChars) + "\n\n[Content truncated...]"
       : text;
 
   const systemPrompt = `You are a knowledge extraction assistant. Your job is to analyze documents and create structured "hex" nodes for a knowledge graph.
@@ -89,9 +338,9 @@ Each hex represents a distinct concept, topic, or piece of information. A hex ha
 - edges: connections to other hexes (optional, for related concepts within the same document)
 
 Guidelines:
-1. Create 1-5 hexes depending on document complexity
-2. For simple documents, one comprehensive hex is fine
-3. For complex documents with distinct sections, create multiple focused hexes
+1. Create 1-3 hexes depending on content complexity
+2. For focused content, one comprehensive hex is ideal
+3. For multi-topic content, create separate focused hexes
 4. entryHints are the most important field - they drive search. Include:
    - The main topic phrase
    - Related synonyms
@@ -145,7 +394,6 @@ Respond with JSON in this exact format:
   // Parse JSON response
   let parsed: unknown;
   try {
-    // Handle potential markdown code blocks
     let jsonStr = textBlock.text.trim();
     if (jsonStr.startsWith("```")) {
       jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
@@ -169,7 +417,6 @@ Respond with JSON in this exact format:
   const hexes: CreateHexInput[] = aiResponse.hexes.map((hex) => {
     const sanitizedId = sanitizeId(hex.id);
 
-    // Also sanitize edge references
     const sanitizedEdges = hex.edges.map((edge) => ({
       id: sanitizeId(edge.id),
       to: sanitizeId(edge.to),
