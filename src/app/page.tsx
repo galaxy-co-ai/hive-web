@@ -1,6 +1,5 @@
 import Link from "next/link";
-import { DropZone } from "@/components/ingest/drop-zone";
-import { Badge } from "@/components/ui/badge";
+import { FloatingIngest } from "@/components/ingest/floating-ingest";
 
 export default function Home() {
   return (
@@ -28,7 +27,7 @@ export default function Home() {
 
       {/* Hero Section */}
       <div className="flex-1 flex flex-col items-center justify-center px-4 py-16">
-        <div className="text-center space-y-4 mb-12">
+        <div className="text-center space-y-4">
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
             Drop anything.
             <br />
@@ -40,17 +39,11 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Drop Zone */}
-        <DropZone />
-
-        {/* Supported Formats */}
-        <div className="mt-8 flex flex-wrap gap-2 justify-center">
-          <Badge variant="outline">PDF</Badge>
-          <Badge variant="outline">TXT</Badge>
-          <Badge variant="outline">Markdown</Badge>
-          <Badge variant="outline">URL</Badge>
-        </div>
+        {/* Content below hero - placeholder for user to specify */}
       </div>
+
+      {/* Floating Ingest Button */}
+      <FloatingIngest />
     </main>
   );
 }
