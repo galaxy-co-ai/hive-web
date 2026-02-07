@@ -11,8 +11,11 @@ export default async function GraphViewPage() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-4">
+          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
+            ← Home
+          </Link>
           <Button asChild variant="ghost" size="sm">
-            <Link href="/viewer">← Grid view</Link>
+            <Link href="/viewer">Grid view</Link>
           </Button>
           <div>
             <h1 className="text-lg font-semibold">Honeycomb graph</h1>

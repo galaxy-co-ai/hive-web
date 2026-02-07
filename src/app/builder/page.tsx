@@ -6,10 +6,13 @@ export default function BuilderPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 lg:px-8">
       {/* Back link */}
-      <div className="mb-6">
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/viewer">← Back to viewer</Link>
-        </Button>
+      <div className="mb-6 flex gap-4">
+        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
+          ← Home
+        </Link>
+        <Link href="/viewer" className="text-sm text-muted-foreground hover:text-foreground">
+          Viewer
+        </Link>
       </div>
 
       {/* Header */}

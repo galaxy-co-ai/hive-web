@@ -37,6 +37,9 @@ export default async function ViewerPage({ searchParams }: PageProps) {
       {/* Header */}
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
+          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
+            ← Home
+          </Link>
           <h1 className="text-2xl font-semibold">Hive viewer</h1>
           <p className="mt-1 text-muted-foreground">
             Browse and search the honeycomb graph
