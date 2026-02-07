@@ -26,7 +26,7 @@ interface UsePanZoomReturn {
   };
   zoomIn: () => void;
   zoomOut: () => void;
-  fitAll: (boundingBox: BoundingBox) => void;
+  fitAll: (boundingBox: BoundingBox, paddingRatio?: number) => void;
   setView: (view: ViewState) => void;
   isDragging: boolean;
 }
@@ -174,15 +174,20 @@ export function usePanZoom(options: UsePanZoomOptions = {}): UsePanZoomReturn {
   }, [view, clampZoom]);
 
   // Fit all content in view
-  const fitAll = useCallback((boundingBox: BoundingBox) => {
+  const fitAll = useCallback((boundingBox: BoundingBox, paddingRatio?: number) => {
     const container = containerRef.current;
     if (!container) return;
 
     const rect = container.getBoundingClientRect();
+    // paddingRatio: e.g. 0.6 means 60% of viewport as padding (for extraction overlay)
+    const padding = paddingRatio !== undefined
+      ? Math.min(rect.width, rect.height) * paddingRatio
+      : 50;
     const transform = calculateFitTransform(
       boundingBox,
       rect.width,
-      rect.height
+      rect.height,
+      padding
     );
 
     setView(transform);

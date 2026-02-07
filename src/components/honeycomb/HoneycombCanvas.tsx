@@ -2,36 +2,32 @@
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import type { Hex } from "@/lib/schemas";
-import type { HoneycombCanvasProps, HoverState, BreadcrumbItem } from "./types";
+import type { HoneycombCanvasProps, HoverState, ExtractionState } from "./types";
 import { CANVAS_BG } from "./utils/constants";
 import { usePanZoom } from "./hooks/usePanZoom";
-import { useHexLayout, getChildHexes, getRootHexes } from "./hooks/useHexLayout";
+import { useHexLayout, getRootHexes } from "./hooks/useHexLayout";
 import { usePulseAnimation } from "./hooks/usePulseAnimation";
 import { useEntranceAnimation } from "./hooks/useEntranceAnimation";
 import { HexNode } from "./HexNode";
 import { HexTooltip } from "./HexTooltip";
 import { ConnectionLines } from "./ConnectionLines";
 import { ZoomControls } from "./ZoomControls";
-import { Breadcrumb } from "./Breadcrumb";
+import { ExtractionOverlay } from "./ExtractionOverlay";
 
 /**
  * Main honeycomb visualization canvas.
  * Orchestrates all sub-components, state, and interactions.
  */
 export function HoneycombCanvas({ hexes }: HoneycombCanvasProps) {
-  // Navigation state for drill-down
-  const [navigationPath, setNavigationPath] = useState<string[]>([]);
-  const currentParentId = navigationPath[navigationPath.length - 1] ?? null;
+  // Extraction state for floating overlay drill-down
+  const [extraction, setExtraction] = useState<ExtractionState>({
+    isOpen: false,
+    stack: [],
+    activeHexId: null,
+  });
 
-  // Compute which hexes to display based on navigation
-  const displayHexes = useMemo(() => {
-    if (currentParentId === null) {
-      return getRootHexes(hexes);
-    }
-    const parent = hexes.find((h) => h.id === currentParentId);
-    if (!parent) return [];
-    return getChildHexes(parent, hexes);
-  }, [hexes, currentParentId]);
+  // Always display root hexes on base map
+  const displayHexes = useMemo(() => getRootHexes(hexes), [hexes]);
 
   // All hex IDs for connection line filtering
   const allHexIds = useMemo(
@@ -53,11 +49,10 @@ export function HoneycombCanvas({ hexes }: HoneycombCanvasProps) {
     zoomIn,
     zoomOut,
     fitAll,
-    setView,
     isDragging,
   } = usePanZoom();
 
-  // Fit content on initial load and navigation changes
+  // Fit content on initial load
   useEffect(() => {
     if (layoutData.length > 0 && containerRef.current) {
       // Small delay to ensure container is measured
@@ -66,7 +61,7 @@ export function HoneycombCanvas({ hexes }: HoneycombCanvasProps) {
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [currentParentId, layoutData.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layoutData.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pulse animation
   const { getPulseOpacity } = usePulseAnimation({
@@ -74,10 +69,10 @@ export function HoneycombCanvas({ hexes }: HoneycombCanvasProps) {
     enabled: true,
   });
 
-  // Entrance animation (restarts on navigation)
+  // Entrance animation
   const { getEntranceProgress } = useEntranceAnimation({
     hexCount: layoutData.length,
-    triggerKey: currentParentId ?? "root",
+    triggerKey: "root",
     enabled: true,
   });
 
@@ -109,14 +104,18 @@ export function HoneycombCanvas({ hexes }: HoneycombCanvasProps) {
     setHoverState((prev) => ({ ...prev, hexId: null }));
   }, []);
 
-  // Click handler for hex navigation/drill-down
+  // Click handler for hex extraction (floating overlay)
   const handleHexClick = useCallback(
     (hex: Hex) => {
-      // If hex has children (edges), drill down
+      // If hex has children (edges), open extraction overlay
       const hasChildren = hex.edges.some((e) => hexes.some((h) => h.id === e.to));
 
       if (hasChildren) {
-        setNavigationPath((prev) => [...prev, hex.id]);
+        setExtraction({
+          isOpen: true,
+          stack: [hex],
+          activeHexId: hex.id,
+        });
       } else {
         // Could open a detail panel or do something else
         console.log("Selected hex:", hex.id, hex.name);
@@ -125,30 +124,47 @@ export function HoneycombCanvas({ hexes }: HoneycombCanvasProps) {
     [hexes]
   );
 
-  // Breadcrumb navigation
-  const breadcrumbItems: BreadcrumbItem[] = useMemo(() => {
-    const items: BreadcrumbItem[] = [{ id: null, label: "All Hexes" }];
+  // Handle drilling deeper in extraction overlay
+  const handleDrillDeeper = useCallback((hex: Hex) => {
+    setExtraction((prev) => ({
+      ...prev,
+      stack: [...prev.stack, hex],
+      activeHexId: hex.id,
+    }));
+  }, []);
 
-    for (const id of navigationPath) {
-      const hex = hexes.find((h) => h.id === id);
-      if (hex) {
-        items.push({ id: hex.id, label: hex.name });
+  // Handle closing extraction overlay
+  const handleCloseExtraction = useCallback(() => {
+    setExtraction((prev) => {
+      // If nested, pop the stack
+      if (prev.stack.length > 1) {
+        const newStack = prev.stack.slice(0, -1);
+        return {
+          ...prev,
+          stack: newStack,
+          activeHexId: newStack[newStack.length - 1]?.id ?? null,
+        };
       }
-    }
+      // Otherwise, close completely
+      return {
+        isOpen: false,
+        stack: [],
+        activeHexId: null,
+      };
+    });
+  }, []);
 
-    return items;
-  }, [navigationPath, hexes]);
-
-  const handleBreadcrumbNavigate = useCallback((id: string | null) => {
-    if (id === null) {
-      setNavigationPath([]);
-    } else {
-      const index = navigationPath.indexOf(id);
-      if (index >= 0) {
-        setNavigationPath(navigationPath.slice(0, index + 1));
+  // Keyboard listener for Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && extraction.isOpen) {
+        handleCloseExtraction();
       }
-    }
-  }, [navigationPath]);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [extraction.isOpen, handleCloseExtraction]);
 
   // Get hovered hex data for tooltip
   const hoveredHex = hoverState.hexId
@@ -158,56 +174,66 @@ export function HoneycombCanvas({ hexes }: HoneycombCanvasProps) {
   // SVG transform string
   const svgTransform = `translate(${view.x}, ${view.y}) scale(${view.scale})`;
 
+  // Base layer styles when extraction is open
+  const baseLayerStyle = extraction.isOpen
+    ? {
+        filter: "blur(6px) brightness(0.35)",
+        pointerEvents: "none" as const,
+        transition: "filter 0.4s ease",
+      }
+    : {
+        transition: "filter 0.4s ease",
+      };
+
   return (
     <div
       ref={containerRef}
       className="relative w-full h-full overflow-hidden select-none"
       style={{
         backgroundColor: CANVAS_BG,
-        cursor: isDragging ? "grabbing" : "grab",
+        cursor: extraction.isOpen ? "default" : isDragging ? "grabbing" : "grab",
       }}
-      {...handlers}
+      {...(extraction.isOpen ? {} : handlers)}
     >
-      {/* SVG Canvas */}
-      <svg
-        className="w-full h-full"
-        style={{ display: "block" }}
-      >
-        {/* Transform group for pan/zoom */}
-        <g transform={svgTransform}>
-          {/* Connection lines (below hexes) */}
-          <ConnectionLines hexes={layoutData} allHexIds={allHexIds} />
+      {/* Base layer (SVG Canvas) */}
+      <div style={baseLayerStyle}>
+        <svg
+          className="w-full h-full"
+          style={{ display: "block" }}
+        >
+          {/* Transform group for pan/zoom */}
+          <g transform={svgTransform}>
+            {/* Connection lines (below hexes) */}
+            <ConnectionLines hexes={layoutData} allHexIds={allHexIds} />
 
-          {/* Hex nodes */}
-          {layoutData.map((data) => (
-            <HexNode
-              key={data.hex.id}
-              data={data}
-              isHovered={hoverState.hexId === data.hex.id}
-              pulseOpacity={getPulseOpacity(data.index)}
-              entranceProgress={getEntranceProgress(data.index)}
-              onClick={handleHexClick}
-              onMouseEnter={handleHexMouseEnter}
-              onMouseLeave={handleHexMouseLeave}
-              onMouseMove={handleHexMouseMove}
-            />
-          ))}
-        </g>
-      </svg>
+            {/* Hex nodes */}
+            {layoutData.map((data) => (
+              <HexNode
+                key={data.hex.id}
+                data={data}
+                isHovered={hoverState.hexId === data.hex.id}
+                isActive={data.hex.id === extraction.activeHexId}
+                pulseOpacity={getPulseOpacity(data.index)}
+                entranceProgress={getEntranceProgress(data.index)}
+                onClick={handleHexClick}
+                onMouseEnter={handleHexMouseEnter}
+                onMouseLeave={handleHexMouseLeave}
+                onMouseMove={handleHexMouseMove}
+              />
+            ))}
+          </g>
+        </svg>
+      </div>
 
-      {/* Tooltip (portal) */}
-      <HexTooltip
-        hex={hoveredHex}
-        x={hoverState.mouseX}
-        y={hoverState.mouseY}
-        visible={!!hoveredHex && !isDragging}
-      />
-
-      {/* Breadcrumb navigation */}
-      <Breadcrumb
-        items={breadcrumbItems}
-        onNavigate={handleBreadcrumbNavigate}
-      />
+      {/* Tooltip (portal) - only show when extraction is closed */}
+      {!extraction.isOpen && (
+        <HexTooltip
+          hex={hoveredHex}
+          x={hoverState.mouseX}
+          y={hoverState.mouseY}
+          visible={!!hoveredHex && !isDragging}
+        />
+      )}
 
       {/* Zoom controls */}
       <ZoomControls
@@ -216,15 +242,23 @@ export function HoneycombCanvas({ hexes }: HoneycombCanvasProps) {
         onFitAll={() => fitAll(boundingBox)}
       />
 
+      {/* Extraction overlay */}
+      {extraction.isOpen && extraction.stack.length > 0 && (
+        <ExtractionOverlay
+          stack={extraction.stack}
+          allHexes={hexes}
+          onClose={handleCloseExtraction}
+          onDrillDeeper={handleDrillDeeper}
+        />
+      )}
+
       {/* Empty state */}
       {displayHexes.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="text-center text-gray-500">
             <p className="text-lg font-medium">No hexes to display</p>
             <p className="text-sm mt-1">
-              {currentParentId
-                ? "This hex has no connected children."
-                : "Create some hexes to see them here."}
+              Create some hexes to see them here.
             </p>
           </div>
         </div>

@@ -13,19 +13,16 @@ export interface ViewState {
 }
 
 // ============================================
-// NAVIGATION STATE
+// EXTRACTION STATE (floating overlay drill-down)
 // ============================================
 
-export interface NavigationState {
-  /** Stack of parent hex IDs for drill-down breadcrumb */
-  path: string[];
-  /** Currently focused hex ID (or null for root view) */
-  currentParentId: string | null;
-}
-
-export interface BreadcrumbItem {
-  id: string | null;
-  label: string;
+export interface ExtractionState {
+  /** Whether the extraction overlay is open */
+  isOpen: boolean;
+  /** Stack of extracted hexes [parent, child, grandchild...] */
+  stack: import("@/lib/schemas").Hex[];
+  /** Active hex ID for base map highlighting */
+  activeHexId: string | null;
 }
 
 // ============================================
@@ -94,6 +91,8 @@ export interface EntranceAnimationState {
 export interface HexNodeProps {
   data: HexRenderData;
   isHovered: boolean;
+  /** Whether this hex is the active parent in extraction overlay */
+  isActive?: boolean;
   pulseOpacity: number;
   entranceProgress: number;
   onClick: (hex: Hex) => void;
@@ -120,9 +119,24 @@ export interface ZoomControlsProps {
   onFitAll: () => void;
 }
 
-export interface BreadcrumbProps {
-  items: BreadcrumbItem[];
-  onNavigate: (id: string | null) => void;
+export interface ExtractionOverlayProps {
+  /** Stack of extracted hexes [parent, child, grandchild...] */
+  stack: Hex[];
+  /** All hexes in the hive */
+  allHexes: Hex[];
+  /** Close the overlay (or pop stack if nested) */
+  onClose: () => void;
+  /** Drill deeper into a child hex */
+  onDrillDeeper: (hex: Hex) => void;
+}
+
+export interface GhostParentProps {
+  /** The parent hex to render as ghost */
+  parentHex: Hex;
+  /** Positions of child hexes (for connection lines) */
+  childPositions: { x: number; y: number }[];
+  /** Size of the ghost hex (relative to children) */
+  size: number;
 }
 
 export interface HoneycombCanvasProps {

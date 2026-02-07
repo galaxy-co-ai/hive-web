@@ -24,6 +24,7 @@ import { easeOutCubic } from "./hooks/useEntranceAnimation";
 export const HexNode = memo(function HexNode({
   data,
   isHovered,
+  isActive = false,
   pulseOpacity,
   entranceProgress,
   onClick,
@@ -47,9 +48,10 @@ export const HexNode = memo(function HexNode({
   // Generate hex points centered at origin (transform moves it)
   const points = useMemo(() => hexPoints(0, 0, HEX_SIZE), []);
   const innerPoints = useMemo(() => hexPoints(0, 0, HEX_SIZE * 0.85), []);
+  const activeRingPoints = useMemo(() => hexPoints(0, 0, HEX_SIZE + 6), []);
 
-  // Glow blur based on hover state
-  const glowBlur = isHovered ? GLOW_BLUR_HOVER : GLOW_BLUR_IDLE;
+  // Glow blur based on hover/active state
+  const glowBlur = isHovered ? GLOW_BLUR_HOVER : isActive ? 10 : GLOW_BLUR_IDLE;
 
   // Unique IDs for gradients and filters
   const gradientId = `hex-gradient-${hex.id}`;
@@ -98,13 +100,23 @@ export const HexNode = memo(function HexNode({
         </filter>
       </defs>
 
+      {/* Layer 0: Active ring (when hex is parent in extraction) */}
+      {isActive && (
+        <polygon
+          points={activeRingPoints}
+          fill={colors.primary}
+          opacity={0.08}
+          filter={`url(#${glowFilterId})`}
+        />
+      )}
+
       {/* Layer 1: Outer glow */}
       <polygon
         points={points}
         fill={colors.glow}
         filter={`url(#${glowFilterId})`}
         style={{
-          opacity: isHovered ? 0.8 : 0.3,
+          opacity: isHovered ? 0.8 : isActive ? 0.6 : 0.3,
           transition: "opacity 150ms ease-out",
         }}
       />
@@ -112,11 +124,12 @@ export const HexNode = memo(function HexNode({
       {/* Layer 2: Background polygon (dark base) */}
       <polygon
         points={points}
-        fill="#0f1015"
+        fill={isActive ? `${colors.primary}15` : "#0f1015"}
         stroke={colors.border}
-        strokeWidth={isHovered ? 2 : 1.5}
+        strokeWidth={isHovered ? 2 : isActive ? 1.5 : 1.5}
+        strokeOpacity={isActive ? 0.6 : 1}
         style={{
-          transition: "stroke-width 150ms ease-out",
+          transition: "stroke-width 150ms ease-out, fill 150ms ease-out",
         }}
       />
 

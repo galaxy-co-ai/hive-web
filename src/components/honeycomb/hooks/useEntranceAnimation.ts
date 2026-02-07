@@ -14,6 +14,10 @@ interface UseEntranceAnimationOptions {
   triggerKey?: string | number;
   /** Whether animation is enabled */
   enabled?: boolean;
+  /** Override stagger delay per hex (ms) */
+  staggerDelay?: number;
+  /** Override duration per hex (ms) */
+  duration?: number;
 }
 
 interface UseEntranceAnimationReturn {
@@ -29,6 +33,8 @@ export function useEntranceAnimation({
   hexCount,
   triggerKey,
   enabled = true,
+  staggerDelay = ENTRANCE_STAGGER,
+  duration = ENTRANCE_DURATION,
 }: UseEntranceAnimationOptions): UseEntranceAnimationReturn {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -55,7 +61,7 @@ export function useEntranceAnimation({
       const elapsed = performance.now() - startTime;
 
       // Check if animation is complete
-      const totalDuration = ENTRANCE_TOTAL_DURATION + hexCount * ENTRANCE_STAGGER;
+      const totalDuration = duration + hexCount * staggerDelay;
       if (elapsed >= totalDuration) {
         setIsAnimating(false);
         if (rafRef.current) {
@@ -78,7 +84,7 @@ export function useEntranceAnimation({
         rafRef.current = null;
       }
     };
-  }, [isAnimating, startTime, hexCount]);
+  }, [isAnimating, startTime, hexCount, staggerDelay, duration]);
 
   const getEntranceProgress = useCallback(
     (index: number): number => {
@@ -86,13 +92,13 @@ export function useEntranceAnimation({
       if (startTime === null) return 0;
 
       const elapsed = performance.now() - startTime;
-      const hexStartTime = index * ENTRANCE_STAGGER;
-      const hexProgress = (elapsed - hexStartTime) / ENTRANCE_DURATION;
+      const hexStartTime = index * staggerDelay;
+      const hexProgress = (elapsed - hexStartTime) / duration;
 
       // Clamp to 0-1 range
       return Math.max(0, Math.min(1, hexProgress));
     },
-    [enabled, startTime]
+    [enabled, startTime, staggerDelay, duration]
   );
 
   return {
