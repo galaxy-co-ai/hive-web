@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
+import Link from "next/link";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -229,10 +230,18 @@ export function FloatingIngest() {
       )}
 
       {/* Floating container */}
-      <div className="fixed bottom-6 right-6 z-50">
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-center gap-3">
+        {/* Search button */}
+        <Link
+          href="/viewer"
+          className="h-12 w-12 rounded-full bg-muted text-muted-foreground shadow-md flex items-center justify-center transition-all hover:scale-105 hover:bg-muted/80 active:scale-95"
+        >
+          <Search className="h-5 w-5" />
+        </Link>
+
         {/* Expanded panel */}
         {isOpen && (
-          <div className="absolute bottom-16 right-0 w-80 bg-background border rounded-lg shadow-lg p-4 animate-in slide-in-from-bottom-2 fade-in duration-200">
+          <div className="absolute bottom-full right-0 mb-3 w-80 bg-background border rounded-lg shadow-lg p-4 animate-in slide-in-from-bottom-2 fade-in duration-200">
             {/* Close button */}
             <button
               onClick={() => setIsOpen(false)}
@@ -248,14 +257,14 @@ export function FloatingIngest() {
                 resetState();
               }}
             >
-              <TabsList className="w-full mb-3 h-8">
-                <TabsTrigger value="file" className="flex-1 text-xs">
+              <TabsList className="w-full mb-3 h-7">
+                <TabsTrigger value="file" className="flex-1 text-xs h-6">
                   File
                 </TabsTrigger>
-                <TabsTrigger value="text" className="flex-1 text-xs">
+                <TabsTrigger value="text" className="flex-1 text-xs h-6">
                   Paste
                 </TabsTrigger>
-                <TabsTrigger value="url" className="flex-1 text-xs">
+                <TabsTrigger value="url" className="flex-1 text-xs h-6">
                   URL
                 </TabsTrigger>
               </TabsList>
