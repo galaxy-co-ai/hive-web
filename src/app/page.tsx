@@ -17,6 +17,12 @@ export default function Home() {
               Viewer
             </Link>
             <Link
+              href="/docs"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Docs
+            </Link>
+            <Link
               href="/builder"
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
             >

@@ -49,6 +49,9 @@ export default async function ViewerPage({ searchParams }: PageProps) {
           <Button asChild variant="outline">
             <Link href="/viewer/graph">Graph view</Link>
           </Button>
+          <Button asChild variant="outline">
+            <Link href="/docs">Docs</Link>
+          </Button>
           <Button asChild>
             <Link href="/builder">Create hex</Link>
           </Button>

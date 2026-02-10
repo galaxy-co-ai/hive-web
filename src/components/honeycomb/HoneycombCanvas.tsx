@@ -196,7 +196,7 @@ export function HoneycombCanvas({ hexes }: HoneycombCanvasProps) {
       {...(extraction.isOpen ? {} : handlers)}
     >
       {/* Base layer (SVG Canvas) */}
-      <div style={baseLayerStyle}>
+      <div className="absolute inset-0" style={baseLayerStyle}>
         <svg
           className="w-full h-full"
           style={{ display: "block" }}

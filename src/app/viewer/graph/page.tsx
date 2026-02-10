@@ -17,6 +17,9 @@ export default async function GraphViewPage() {
           <Button asChild variant="ghost" size="sm" className="text-gray-400 hover:text-white hover:bg-gray-800">
             <Link href="/viewer">Grid view</Link>
           </Button>
+          <Button asChild variant="ghost" size="sm" className="text-gray-400 hover:text-white hover:bg-gray-800">
+            <Link href="/docs">Docs</Link>
+          </Button>
           <div>
             <h1 className="text-lg font-semibold text-white">Honeycomb Graph</h1>
             <p className="text-sm text-gray-500">
